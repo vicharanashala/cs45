@@ -1,21 +1,36 @@
 import { useEffect, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { motion, AnimatePresence } from "motion/react";
 import {
-  ArrowUp, ArrowDown, MessageSquare, Bookmark, Plus, ShieldCheck,
-  Loader2, Check, AlertTriangle, X, Send,
+  ArrowUp, ArrowDown, MessageSquare, Bookmark, ShieldCheck,
+  Plus, Send,
 } from "lucide-react";
-import { store, addQuery, addAnswer, fetchQuestionDetails, voteQuestion } from "@/lib/mockStore";
+import { store, addAnswer, fetchQuestionDetails, voteQuestion, hasBookmark, toggleBookmark } from "@/lib/mockStore";
 import { useAuth } from "@/lib/auth";
 import { toast } from "sonner";
 
 export function Community() {
+  const location = useLocation();
   const [sort, setSort] = useState("top");
   const [state, setState] = useState(store.get());
-  const [votes, setVotes] = useState({});
-  const [askOpen, setAskOpen] = useState(false);
+  const [votes, setVotes] = useState(() => {
+    try {
+      return JSON.parse(localStorage.getItem("yaksha.votes.v1") || "{}");
+    } catch {
+      return {};
+    }
+  });
 
   useEffect(() => store.subscribe(setState), []);
+
+  useEffect(() => {
+    if (location.state?.scrollTo) {
+      setTimeout(() => {
+        const el = document.getElementById(`query-${location.state.scrollTo}`);
+        if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+      }, 150);
+    }
+  }, [location.state, state.threads]);
 
   const sorted = [...state.threads].sort((a, b) => {
     if (sort === "top") return (b.upvotes ?? 0) - (a.upvotes ?? 0);
@@ -27,7 +42,9 @@ export function Community() {
     const val = currentVote === dir ? -dir : dir;
     try {
       await voteQuestion(id, val);
-      setVotes((p) => ({ ...p, [id]: p[id] === dir ? 0 : dir }));
+      const newVotes = { ...votes, [id]: currentVote === dir ? 0 : dir };
+      setVotes(newVotes);
+      localStorage.setItem("yaksha.votes.v1", JSON.stringify(newVotes));
       toast.success("Vote recorded");
     } catch (e) {
       toast.error(e.message);
@@ -47,10 +64,10 @@ export function Community() {
               </button>
             ))}
           </div>
-          <button onClick={() => setAskOpen(true)}
+          <Link to="/my-queries"
             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-primary text-primary-foreground text-sm font-medium shadow-glow hover:opacity-95 transition">
-            <Plus className="w-4 h-4" /> Ask the Community
-          </button>
+            <Plus className="w-4 h-4" /> Ask a Question
+          </Link>
         </div>
 
         {sorted.length === 0 ? (
@@ -58,7 +75,14 @@ export function Community() {
         ) : (
           <div className="space-y-3">
             {sorted.map((t, i) => (
-              <ThreadCard key={t.id} t={t} i={i} answers={state.answers.filter((a) => a.threadId === t.id)} vote={votes[t.id] ?? 0} onVote={(d) => vote(t.id, d)} />
+              <ThreadCard
+                key={t.id || t._id}
+                t={t}
+                i={i}
+                answers={state.answers.filter((a) => a.threadId === (t.id || t._id))}
+                vote={votes[t.id || t._id] ?? 0}
+                onVote={(d) => vote(t.id || t._id, d)}
+              />
             ))}
           </div>
         )}
@@ -73,16 +97,17 @@ export function Community() {
         </div>
         <div className="rounded-2xl border border-border bg-mesh p-5 shadow-soft">
           <h3 className="font-display font-semibold text-sm mb-2">Tip</h3>
-          <p className="text-xs text-muted-foreground">Any question you ask is auto-routed. Private ones go to admins; generic ones land here.</p>
+          <p className="text-xs text-muted-foreground">
+            Questions are submitted from the <strong>My Queries</strong> page. Private ones go
+            to admins; generic ones appear here.
+          </p>
         </div>
       </aside>
-
-      <AnimatePresence>
-        {askOpen && <AskForm onClose={() => setAskOpen(false)} />}
-      </AnimatePresence>
     </div>
   );
 }
+
+/* ─── Helpers ──────────────────────────────────────────────────────────────── */
 
 function Stat({ label, value }) {
   return (
@@ -97,176 +122,152 @@ function ThreadCard({ t, i, answers, vote, onVote }) {
   const [expand, setExpand] = useState(false);
   const [body, setBody] = useState("");
   const { user } = useAuth();
+  const [isSaved, setIsSaved] = useState(hasBookmark(t.id || t._id));
 
-  const submit = async () => {
+  const handleSave = () => {
+    setIsSaved(toggleBookmark(t));
+    toast.success(isSaved ? "Removed from bookmarks" : "Saved to bookmarks");
+  };
+
+  const submitAnswer = async () => {
     if (!body.trim()) return;
     try {
-      await addAnswer(t.id, body, user?.handle || "@you");
+      await addAnswer(t.id || t._id, body, user?.handle || "@you");
       setBody("");
-      toast.success("Answer submitted successfully");
+      toast.success("Answer submitted!");
     } catch (err) {
       toast.error(err.message);
     }
   };
 
   const toggleExpand = () => {
-    if (!expand) {
-      fetchQuestionDetails(t.id);
-    }
+    if (!expand) fetchQuestionDetails(t.id || t._id);
     setExpand(!expand);
   };
 
+  const authorName = t.author?.name || t.author || "Community";
+  const bodyText   = t.body || t.content || "";
+
   return (
-    <motion.article initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: i * 0.04 }}
-      className="p-5 rounded-2xl bg-card border border-border hover:border-primary/40 hover:shadow-elegant transition-all">
+    <motion.article
+      id={`query-${t.id || t._id}`}
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ delay: i * 0.04 }}
+      className="p-5 rounded-2xl bg-card border border-border hover:border-primary/40 hover:shadow-elegant transition-all"
+    >
       <div className="flex gap-4">
+        {/* Vote column */}
         <div className="flex flex-col items-center gap-1 shrink-0">
-          <button onClick={() => onVote(1)} className={`p-1.5 rounded-lg ${vote === 1 ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-secondary"}`}>
+          <button
+            onClick={() => onVote(1)}
+            className={`p-1.5 rounded-lg ${vote === 1 ? "bg-primary/15 text-primary" : "text-muted-foreground hover:bg-secondary"}`}
+          >
             <ArrowUp className="w-4 h-4" strokeWidth={2.5} />
           </button>
           <span className={`text-sm font-bold tabular-nums ${vote === 1 ? "text-primary" : vote === -1 ? "text-destructive" : "text-foreground"}`}>
             {(t.upvotes ?? 0) + vote}
           </span>
-          <button onClick={() => onVote(-1)} className={`p-1.5 rounded-lg ${vote === -1 ? "bg-destructive/15 text-destructive" : "text-muted-foreground hover:bg-secondary"}`}>
+          <button
+            onClick={() => onVote(-1)}
+            className={`p-1.5 rounded-lg ${vote === -1 ? "bg-destructive/15 text-destructive" : "text-muted-foreground hover:bg-secondary"}`}
+          >
             <ArrowDown className="w-4 h-4" strokeWidth={2.5} />
           </button>
         </div>
+
+        {/* Content column */}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-2 mb-1.5 text-xs">
-            <span className="px-2 py-0.5 rounded-md bg-secondary text-secondary-foreground font-medium">{t.tag}</span>
+            {t.tag && (
+              <span className="px-2 py-0.5 rounded-md bg-secondary text-secondary-foreground font-medium">{t.tag}</span>
+            )}
             <span className="text-muted-foreground">·</span>
-            <span className="text-muted-foreground">{t.author}</span>
+            <span className="text-muted-foreground">{authorName}</span>
           </div>
           <h3 className="font-display text-lg font-semibold leading-snug mb-1.5">{t.title}</h3>
-          <p className="text-sm text-muted-foreground">{t.body}</p>
+          {bodyText && <p className="text-sm text-muted-foreground">{bodyText}</p>}
+
           <div className="flex items-center gap-4 mt-3 text-xs text-muted-foreground">
             <button onClick={toggleExpand} className="inline-flex items-center gap-1.5 hover:text-foreground">
-              <MessageSquare className="w-3.5 h-3.5" /> {expand ? "Hide answers" : `View ${answers.length} answers`}
+              <MessageSquare className="w-3.5 h-3.5" />
+              {expand ? "Hide answers" : `View ${answers.length} answer${answers.length !== 1 ? "s" : ""}`}
             </button>
-            <span className="inline-flex items-center gap-1.5 hover:text-foreground cursor-pointer">
-              <Bookmark className="w-3.5 h-3.5" /> Save
-            </span>
+            <button onClick={handleSave} className={`inline-flex items-center gap-1.5 hover:text-foreground cursor-pointer ${isSaved ? "text-primary" : ""}`}>
+              <Bookmark className="w-3.5 h-3.5" fill={isSaved ? "currentColor" : "none"} /> {isSaved ? "Saved" : "Save"}
+            </button>
           </div>
+
+          {!expand && t.latestAnswer && (
+            <div className="mt-3 rounded-xl border border-border bg-secondary/40 px-3 py-2 text-xs text-muted-foreground">
+              <div className="flex items-center justify-between gap-3 mb-1">
+                <span className="font-medium text-foreground">Latest answer</span>
+                <span>{t.latestAnswer.author?.name || t.latestAnswer.author || "@mentor"}</span>
+              </div>
+              <p className="line-clamp-2">{t.latestAnswer.body || t.latestAnswer.content}</p>
+            </div>
+          )}
         </div>
       </div>
 
+      {/* Expanded answers + reply box */}
       <AnimatePresence>
         {expand && (
-          <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden mt-4 pl-12">
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden mt-4 pl-12"
+          >
             <div className="space-y-2">
-              {answers.length === 0 && <div className="text-xs text-muted-foreground">No answers yet.</div>}
+              {answers.length === 0 && (
+                <div className="text-xs text-muted-foreground py-2">No answers yet. Be the first!</div>
+              )}
               {answers.map((a) => (
-                <div key={a.id} className={`p-3 rounded-xl text-sm border ${
-                  a.status === "approved" ? "bg-success/10 border-success/30" :
-                  a.status === "rejected" ? "bg-destructive/10 border-destructive/30 opacity-60" :
-                  "bg-warning/10 border-warning/30"}`}>
-                  <div className="text-[10px] uppercase font-bold tracking-wider mb-1">
-                    {a.status === "approved" ? <span className="inline-flex items-center gap-1"><ShieldCheck className="w-3 h-3" /> Verified</span>
-                      : a.status === "rejected" ? "Rejected" : "Pending review"}
+                <div
+                  key={a.id || a._id}
+                  className={`p-3 rounded-xl text-sm border ${
+                    a.isAccepted
+                      ? "bg-success/10 border-success/30"
+                      : a.status === "rejected"
+                      ? "bg-destructive/10 border-destructive/30 opacity-60"
+                      : "bg-secondary/40 border-border"
+                  }`}
+                >
+                  {a.isAccepted && (
+                    <div className="text-[10px] uppercase font-bold tracking-wider mb-1 text-success inline-flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3" /> Accepted answer
+                    </div>
+                  )}
+                  <p>{a.body || a.content}</p>
+                  <div className="text-[10px] text-muted-foreground mt-1.5">
+                    {a.author?.name || a.author || "Community member"}
                   </div>
-                  <p>{a.body}</p>
                 </div>
               ))}
-              <div className="flex gap-2 pt-2">
-                <input value={body} onChange={(e) => setBody(e.target.value)} placeholder="Write an answer…"
-                  className="flex-1 px-3 py-2 rounded-lg bg-secondary/50 border border-border text-sm outline-none focus:ring-focus" />
-                <button onClick={submit} disabled={!body.trim()}
-                  className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-foreground text-background text-xs font-medium disabled:opacity-50">
-                  <Send className="w-3.5 h-3.5" /> Submit
-                </button>
-              </div>
+
+              {user && (
+                <div className="flex gap-2 pt-2">
+                  <input
+                    value={body}
+                    onChange={(e) => setBody(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && !e.shiftKey && submitAnswer()}
+                    placeholder="Write an answer…"
+                    className="flex-1 px-3 py-2 rounded-lg bg-secondary/50 border border-border text-sm outline-none focus:ring-focus"
+                  />
+                  <button
+                    onClick={submitAnswer}
+                    disabled={!body.trim()}
+                    className="inline-flex items-center gap-1.5 px-3 py-2 rounded-lg bg-foreground text-background text-xs font-medium disabled:opacity-50"
+                  >
+                    <Send className="w-3.5 h-3.5" /> Submit
+                  </button>
+                </div>
+              )}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
     </motion.article>
-  );
-}
-
-function AskForm({ onClose }) {
-  const [title, setTitle] = useState("");
-  const [body, setBody] = useState("");
-  const [stage, setStage] = useState("draft");
-  const [route, setRoute] = useState(null);
-
-  const submit = async () => {
-    if (!title.trim()) return;
-    setStage("checking");
-    try {
-      const q = await addQuery({ title, body });
-      setRoute(q.route);
-      setStage(q.route === "personal" ? "flagged" : "ok");
-      if (q.route === "generic") setTimeout(onClose, 1400);
-    } catch (err) {
-      toast.error(err.message || "Failed to submit query");
-      setStage("draft");
-    }
-  };
-
-  return (
-    <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-      className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-foreground/40 backdrop-blur-md" onClick={onClose}>
-      <motion.div initial={{ scale: 0.96, y: 10, opacity: 0 }} animate={{ scale: 1, y: 0, opacity: 1 }} exit={{ scale: 0.96, opacity: 0 }}
-        transition={{ type: "spring", stiffness: 360, damping: 30 }} onClick={(e) => e.stopPropagation()}
-        className="w-full max-w-xl bg-card rounded-2xl border border-border shadow-elegant overflow-hidden">
-        {stage === "draft" && (
-          <>
-            <div className="flex items-center justify-between p-5 border-b border-border">
-              <div>
-                <h3 className="font-display text-lg font-semibold">Draft a new question</h3>
-                <p className="text-xs text-muted-foreground mt-0.5">AI routes it to community or admins.</p>
-              </div>
-              <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-secondary"><X className="w-4 h-4" /></button>
-            </div>
-            <div className="p-5 space-y-4">
-              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Title — be specific"
-                className="w-full bg-secondary/50 rounded-xl px-4 py-3 outline-none focus:ring-focus border border-border" />
-              <textarea value={body} onChange={(e) => setBody(e.target.value)} placeholder="Add context…" rows={5}
-                className="w-full bg-secondary/50 rounded-xl px-4 py-3 outline-none focus:ring-focus border border-border resize-none" />
-              <button onClick={submit} disabled={!title.trim()}
-                className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-gradient-primary text-primary-foreground font-medium shadow-glow disabled:opacity-40">
-                Analyze & Submit
-              </button>
-            </div>
-          </>
-        )}
-        {stage === "checking" && (
-          <div className="p-12 flex flex-col items-center gap-5 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-gradient-primary flex items-center justify-center shadow-glow">
-              <Loader2 className="w-7 h-7 text-primary-foreground animate-spin" />
-            </div>
-            <div><h3 className="font-display text-lg font-semibold mb-1">AI Routing Engine…</h3>
-              <p className="text-sm text-muted-foreground">Personal or generic?</p></div>
-          </div>
-        )}
-        {stage === "ok" && (
-          <Result tone="success" icon={<Check className="w-6 h-6" />} title="Posted to community"
-            body="AI classified your query as generic. It's live on the feed." />
-        )}
-        {stage === "flagged" && (
-          <Result tone="warning" icon={<AlertTriangle className="w-6 h-6" />} title="Routed privately to admins"
-            body="AI detected personal content. It's now in your My Queries page." onClose={onClose} />
-        )}
-      </motion.div>
-    </motion.div>
-  );
-}
-
-function Result({ tone, icon, title, body, onClose }) {
-  const isSuccess = tone === "success";
-  return (
-    <div className="p-8 flex flex-col items-center text-center gap-4">
-      <div className={`w-14 h-14 rounded-2xl flex items-center justify-center ${isSuccess ? "bg-success text-success-foreground" : "bg-warning text-warning-foreground"}`}>
-        {icon}
-      </div>
-      <div><h3 className="font-display text-lg font-semibold">{title}</h3>
-        <p className="text-sm text-muted-foreground mt-1.5 max-w-sm">{body}</p></div>
-      {onClose && (
-        <Link to="/my-queries" onClick={onClose} className="mt-2 px-4 py-2 text-sm font-medium rounded-lg bg-foreground text-background">
-          View My Queries
-        </Link>
-      )}
-    </div>
   );
 }

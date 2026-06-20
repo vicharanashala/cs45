@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 import { AnimatePresence, motion } from "motion/react";
 import { Navbar } from "@/components/yaksha/Navbar";
 import { YakshaSearch } from "@/components/yaksha/YakshaSearch";
@@ -8,7 +8,8 @@ import { Profile } from "@/components/yaksha/Profile";
 import { useAuth } from "@/lib/auth";
 
 export default function Index() {
-  const [view, setView] = useState("search");
+  const location = useLocation();
+  const [view, setView] = useState(location.state?.view || "search");
   const { user, profile, isAdmin } = useAuth();
   const nav = useNavigate();
 

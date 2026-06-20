@@ -7,13 +7,13 @@
 require("dotenv").config();
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
-const connectDB = require("../config/db");
+const connectDB = require("./db");
 
-const User = require("../models/User");
-const Question = require("../models/Question");
-const Answer = require("../models/Answer");
-const FaqElement = require("../models/FaqElement");
-const Feedback = require("../models/Feedback");
+const User = require("./User");
+const Question = require("./Question");
+const Answer = require("./Answer");
+const FaqElement = require("./FaqElement");
+const Feedback = require("./Feedback");
 
 const seed = async () => {
   await connectDB();

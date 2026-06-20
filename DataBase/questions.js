@@ -1,8 +1,8 @@
 const express = require("express");
 const router = express.Router();
-const Question = require("../models/Question");
-const Answer = require("../models/Answer");
-const User = require("../models/User");
+const Question = require("./Question");
+const Answer = require("./Answer");
+const User = require("./User");
 
 // ─── POST /questions ─────────────────────────────────────────────────────────
 // Raise a new query (only if similarity_confidence < 0.80 from Yaksha)

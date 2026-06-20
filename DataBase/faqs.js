@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
-const FaqElement = require("../models/FaqElement");
-const User = require("../models/User");
+const FaqElement = require("./FaqElement");
+const User = require("./User");
 
 // ─── POST /faqs ───────────────────────────────────────────────────────────────
 // Create a new FAQ entry (called by /ai/generate-faq internally)

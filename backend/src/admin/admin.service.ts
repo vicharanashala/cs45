@@ -92,10 +92,42 @@ export class AdminService {
    * Retrieves all private, sensitive user inquiries routed to admins.
    */
   async getPersonalQueries() {
-    return this.questionModel
-      .find({ type: 'personal' })
+    const questions = await this.questionModel
+      .find({ $or: [{ type: 'personal' }, { adminReviewRequested: true }] })
       .populate('author', 'name email reputationPoints')
       .sort({ createdAt: -1 });
+
+    const questionIds = questions.map((q) => q._id.toString());
+    const answers = questionIds.length
+      ? await this.answerModel
+          .find({ questionId: { $in: questionIds }, isAccepted: true })
+          .populate('author', 'name role')
+          .sort({ createdAt: -1 })
+      : [];
+
+    const answerByQuestion = new Map<string, any>();
+    for (const answer of answers) {
+      const key = answer.questionId.toString();
+      if (!answerByQuestion.has(key)) {
+        answerByQuestion.set(key, answer);
+      }
+    }
+
+    return questions.map((question) => {
+      const latestAnswer = answerByQuestion.get(question._id.toString()) || null;
+      return {
+        ...question.toObject(),
+        latestAnswer: latestAnswer
+          ? {
+              _id: latestAnswer._id,
+              content: latestAnswer.content,
+              isAccepted: latestAnswer.isAccepted,
+              createdAt: latestAnswer.createdAt,
+              author: latestAnswer.author,
+            }
+          : null,
+      };
+    });
   }
 
   /**
@@ -105,10 +137,10 @@ export class AdminService {
   async reviewPersonalQuery(
     adminId: string,
     queryId: string,
-    responseDto: { answerContent: string },
+    responseDto: { answerContent: string; isValid?: boolean },
   ) {
     const question = await this.questionModel.findById(queryId);
-    if (!question || question.type !== 'personal') {
+    if (!question || (question.type !== 'personal' && !question.adminReviewRequested)) {
       throw new NotFoundException('Personal query not found');
     }
 
@@ -124,12 +156,32 @@ export class AdminService {
     question.moderationStatus = 'approved';
     question.isClosed = true;
     await question.save();
+    
+    // SP Betting Resolution
+    let extraMessage = '';
+    if (question.adminReviewRequested && question.adminReviewBetSp > 0) {
+      const user = await this.userModel.findById(question.author);
+      if (user) {
+        if (responseDto.isValid) {
+          // Win: escrow + 2x bet
+          const winSp = question.adminReviewBetSp * 3;
+          user.reputationPoints += winSp;
+          extraMessage = ` You won your bet! +${question.adminReviewBetSp * 2} SP net gain.`;
+        } else {
+          // Lose: lose another 1x bet
+          const loseSp = question.adminReviewBetSp;
+          user.reputationPoints = Math.max(0, user.reputationPoints - loseSp);
+          extraMessage = ` Your query was marked duplicate/invalid. You lost your bet (-${question.adminReviewBetSp * 2} SP net loss).`;
+        }
+        await user.save();
+      }
+    }
 
     // Notify user of private query resolution
     const notification = new this.notificationModel({
       recipient: question.author.toString(),
       title: 'Private Query Resolved',
-      message: `Your sensitive query "${question.title.substring(0, 30)}..." has been reviewed and answered by an administrator.`,
+      message: `Your sensitive query "${question.title.substring(0, 30)}..." has been reviewed and answered by an administrator.${extraMessage}`,
       type: 'moderation',
       isRead: false,
     });

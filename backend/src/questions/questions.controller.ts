@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Param, Query, UseGuards, Req } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Query, UseGuards, Req } from '@nestjs/common';
 import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth, ApiBody, ApiParam, ApiQuery } from '@nestjs/swagger';
 import { QuestionsService } from './questions.service';
 import { JwtAuthGuard } from '../auth/jwt-auth.guard';
@@ -47,13 +47,23 @@ export class QuestionsController {
 
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth('JWT-auth')
+  @Post('analyze-toxicity')
+  @ApiOperation({ summary: 'Pre-check text for toxicity' })
+  @ApiBody({ schema: { example: { text: 'Some text to check' } } })
+  @ApiResponse({ status: 200, description: 'Returns { isToxic: boolean, reason?: string }' })
+  async analyzeToxicity(@Body() body: { text: string }) {
+    return this.questionsService.analyzeToxicity(body.text);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
   @Post()
   @ApiOperation({ summary: 'Post a new question to the community' })
   @ApiBody({ schema: { example: { title: 'How do I reset my password?', content: 'I forgot my password and cannot log in.' } } })
   @ApiResponse({ status: 201, description: 'Question posted. Returns the created question object.' })
   async raiseQuery(
     @Req() req: any,
-    @Body() body: { title: string; content: string },
+    @Body() body: { title: string; content: string; adminReviewRequested?: boolean; adminReviewBetSp?: number },
   ) {
     return this.questionsService.raiseQuery(req.user._id, body);
   }
@@ -133,5 +143,15 @@ export class QuestionsController {
   async checkBookmark(@Req() req: any, @Param('id') id: string) {
     const isBookmarked = await this.questionsService.isBookmarked(req.user._id, id);
     return { bookmarked: isBookmarked };
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth('JWT-auth')
+  @Delete(':id')
+  @ApiOperation({ summary: 'Delete a query' })
+  @ApiParam({ name: 'id', description: 'Question ID' })
+  @ApiResponse({ status: 200, description: 'Query deleted.' })
+  async deleteQuery(@Req() req: any, @Param('id') id: string) {
+    return this.questionsService.deleteQuery(req.user._id, id);
   }
 }

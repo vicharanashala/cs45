@@ -47,7 +47,38 @@ export class QuestionsService {
       questions = questions.filter((q) => q.answerCount === 0);
     }
 
-    return questions;
+    const questionIds = questions.map((q) => q._id.toString());
+    const answers = questionIds.length
+      ? await this.answerModel
+          .find({ questionId: { $in: questionIds } })
+          .populate('author', 'name reputationPoints role')
+          .sort({ createdAt: -1 })
+      : [];
+
+    const answerByQuestion = new Map<string, any>();
+    for (const answer of answers) {
+      const key = answer.questionId.toString();
+      if (!answerByQuestion.has(key)) {
+        answerByQuestion.set(key, answer);
+      }
+    }
+
+    return questions.map((question) => {
+      const latestAnswer = answerByQuestion.get(question._id.toString()) || null;
+      return {
+        ...question.toObject(),
+        latestAnswer: latestAnswer
+          ? {
+              _id: latestAnswer._id,
+              content: latestAnswer.content,
+              isAccepted: latestAnswer.isAccepted,
+              upvotes: latestAnswer.upvotes,
+              createdAt: latestAnswer.createdAt,
+              author: latestAnswer.author,
+            }
+          : null,
+      };
+    });
   }
 
   async getQuestionDetails(questionId: string, userId?: string) {
@@ -91,9 +122,13 @@ export class QuestionsService {
    * 2. Semantic query classification: flags personal billing/sensitive requests as 'personal', routing them away from public feed.
    * 3. Generic submission: posts immediately and awards +5 SP reputation points.
    */
+  async analyzeToxicity(text: string) {
+    return this.aiService.analyzeToxicity(text);
+  }
+
   async raiseQuery(
     userId: string,
-    questionDto: { title: string; content: string },
+    questionDto: { title: string; content: string; adminReviewRequested?: boolean; adminReviewBetSp?: number },
   ) {
     const title = questionDto.title.trim();
     const content = questionDto.content.trim();
@@ -110,7 +145,17 @@ export class QuestionsService {
 
     // 2. Query classification (generic vs. personal)
     const classification = await this.aiService.classifyQuery(`${title} ${content}`);
-    const isPersonal = classification.type === 'personal';
+    const isPersonal = classification.type === 'personal' || questionDto.adminReviewRequested;
+
+    // 3. Handle SP Betting Escrow
+    if (questionDto.adminReviewRequested && questionDto.adminReviewBetSp > 0) {
+      const user = await this.userModel.findById(userId);
+      if (!user || user.reputationPoints < questionDto.adminReviewBetSp) {
+        throw new BadRequestException('Insufficient SP points for this bet.');
+      }
+      user.reputationPoints -= questionDto.adminReviewBetSp;
+      await user.save();
+    }
 
     const embedding = await this.aiService.generateEmbeddings(title);
 
@@ -122,6 +167,8 @@ export class QuestionsService {
       embedding,
       moderationStatus: isPersonal ? 'pending' : 'approved',
       isClosed: false,
+      adminReviewRequested: questionDto.adminReviewRequested || false,
+      adminReviewBetSp: questionDto.adminReviewBetSp || 0,
     });
 
     const saved = await question.save();
@@ -487,5 +534,32 @@ export class QuestionsService {
     }
     if (norm1 === 0 || norm2 === 0) return 0;
     return dotProduct / (Math.sqrt(norm1) * Math.sqrt(norm2));
+  }
+
+  async deleteQuery(userId: string, questionId: string) {
+    const question = await this.questionModel.findById(questionId);
+    if (!question) throw new NotFoundException('Question not found');
+    
+    // Check ownership
+    if (question.author.toString() !== userId.toString()) {
+       const user = await this.userModel.findById(userId);
+       if (!user || user.role !== 'admin') {
+         throw new ForbiddenException('You can only delete your own queries');
+       }
+    }
+    
+    // Refund escrow if deleted while pending
+    if (question.adminReviewRequested && question.moderationStatus === 'pending') {
+       const user = await this.userModel.findById(question.author);
+       if (user) {
+         user.reputationPoints += (question.adminReviewBetSp || 0);
+         await user.save();
+       }
+    }
+    
+    await this.questionModel.deleteOne({ _id: questionId });
+    await this.answerModel.deleteMany({ questionId });
+    await this.bookmarkModel.deleteMany({ itemId: questionId });
+    return { success: true };
   }
 }

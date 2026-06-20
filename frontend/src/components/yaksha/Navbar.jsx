@@ -42,7 +42,7 @@ export function Navbar({ user: navUser, active, onNavigate, isAdmin: adminProp, 
   return (
     <header className="sticky top-0 z-50 glass border-b border-border/60">
       <div className="mx-auto max-w-7xl px-6 h-16 flex items-center gap-6">
-        <Link to="/" className="flex items-center gap-2.5">
+        <button onClick={() => nav("/", { state: { view: "search" } })} className="flex items-center gap-2.5">
           <div className="relative w-9 h-9 rounded-xl bg-gradient-primary flex items-center justify-center shadow-glow">
             <Sparkles className="w-4 h-4 text-primary-foreground" strokeWidth={2.5} />
           </div>
@@ -52,7 +52,7 @@ export function Navbar({ user: navUser, active, onNavigate, isAdmin: adminProp, 
               Campus Knowledge OS
             </span>
           </div>
-        </Link>
+        </button>
 
         <nav className="hidden md:flex items-center gap-1 ml-4">
           {tabs.map((t) => (
@@ -93,7 +93,7 @@ export function Navbar({ user: navUser, active, onNavigate, isAdmin: adminProp, 
 
         {authUser && (
           <button
-            onClick={onOpenFaqs ? onOpenFaqs : () => nav("/", { state: { view: "faqs" } })}
+            onClick={() => nav("/", { state: { view: "search" } })}
             title="Browse FAQs"
             className="hidden sm:inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium border border-border bg-secondary/70 hover:bg-secondary text-foreground"
           >

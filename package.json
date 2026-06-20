@@ -1,0 +1,28 @@
+{
+  "name": "vicharanashala-faq-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Monorepo for Vicharanashala / Samagama FAQ platform (frontend + backend + services)",
+  "workspaces": [
+    "backend",
+    "frontend",
+    "DataBase",
+    "ai_functions/*"
+  ],
+  "engines": {
+    "node": ">=18.16.0"
+  },
+  "scripts": {
+    "bootstrap": "npm install",
+    "postinstall": "npm run -w backend install || true",
+    "dev": "concurrently \"npm --workspace backend run start:dev\" \"npm --workspace frontend run dev\" \"npm --workspace DataBase run dev\"",
+    "start:backend": "npm --workspace backend run start:prod",
+    "start:frontend": "npm --workspace frontend run preview",
+    "build": "npm --workspace backend run build && npm --workspace frontend run build",
+    "lint": "echo \"Run linters in each workspace as needed\"",
+    "test": "echo \"Run tests in each workspace\""
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.0"
+  }
+}

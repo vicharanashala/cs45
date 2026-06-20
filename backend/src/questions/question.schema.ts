@@ -34,6 +34,15 @@ export class Question {
 
   @Prop({ default: false })
   isClosed: boolean;
+
+  @Prop({ default: false })
+  adminReviewRequested: boolean;
+
+  @Prop({ default: 0 })
+  adminReviewBetSp: number;
+
+  @Prop({ default: 0 })
+  adminReviewPriority: number;
 }
 
 export const QuestionSchema = SchemaFactory.createForClass(Question);

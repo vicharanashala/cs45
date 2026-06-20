@@ -49,6 +49,17 @@ const loadCommunityQuestions = async () => {
       upvotes: q.upvotes || 0,
       createdAt: new Date(q.createdAt).getTime(),
       answerCount: q.answerCount || 0,
+      latestAnswer: q.latestAnswer
+        ? {
+            id: q.latestAnswer._id,
+            body: q.latestAnswer.content,
+            isAccepted: !!q.latestAnswer.isAccepted,
+            createdAt: new Date(q.latestAnswer.createdAt).getTime(),
+            author: q.latestAnswer.author?.name
+              ? `@${q.latestAnswer.author.name.toLowerCase().replace(/\s+/g, "")}`
+              : "@mentor",
+          }
+        : null,
     }));
   } catch (e) {
     console.error("Error loading community questions:", e);
@@ -82,7 +93,13 @@ const loadMyQueries = async () => {
         const data = await res.json();
         // data contains { question, answers }
         const q = data.question;
-        const acceptedAnswer = data.answers.find((a) => a.isAccepted);
+        // Prefer accepted answers first; fall back to any answer so admin replies
+        // submitted via /api/admin/moderation/personal/:id/review are always shown.
+        const acceptedAnswers = (data.answers || []).filter((a) => a.isAccepted);
+        const anyAnswer = data.answers && data.answers.length > 0 ? data.answers[0] : null;
+        const resolvedAnswer = acceptedAnswers.length > 0
+          ? acceptedAnswers[acceptedAnswers.length - 1]
+          : anyAnswer;
         const isRejected = rejectedIds.includes(q._id);
         queries.push({
           id: q._id,
@@ -93,8 +110,10 @@ const loadMyQueries = async () => {
           status: isRejected ? "rejected" : (q.isClosed ? "answered" : q.moderationStatus),
           warnings: 0,
           flagged: q.isModerated || false,
-          adminReply: acceptedAnswer ? acceptedAnswer.content : "",
-          aiAnswer: acceptedAnswer ? acceptedAnswer.content : "",
+          adminReply: resolvedAnswer ? resolvedAnswer.content : "",
+          aiAnswer: resolvedAnswer ? (resolvedAnswer.isAccepted ? resolvedAnswer.content : "") : "",
+          adminReviewRequested: q.adminReviewRequested || false,
+          adminReviewBetSp: q.adminReviewBetSp || 0,
           createdAt: new Date(q.createdAt).getTime(),
         });
       }
@@ -112,7 +131,7 @@ export const refreshData = async () => {
     const token = localStorage.getItem(LS_TOKEN);
     const user = getAuth();
 
-    const [faqsData, threads, notificationsData] = await Promise.all([
+    const [faqsData, threads, notificationsData, meData] = await Promise.all([
       fetch(`${API_URL}/api/faqs`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
       loadCommunityQuestions(),
       token
@@ -120,7 +139,22 @@ export const refreshData = async () => {
             .then((r) => (r.ok ? r.json() : []))
             .catch(() => [])
         : Promise.resolve([]),
+      token
+        ? fetch(`${API_URL}/api/auth/me`, { headers: getAuthHeaders() })
+            .then((r) => (r.ok ? r.json() : null))
+            .catch(() => null)
+        : Promise.resolve(null),
     ]);
+
+    if (meData && user) {
+      const updatedUser = {
+        ...user,
+        sp: meData.reputationPoints ?? user.sp,
+        role: meData.role ?? user.role,
+      };
+      localStorage.setItem(LS_AUTH, JSON.stringify(updatedUser));
+      emitAuth(); // update UI components with latest user data (like SP in Navbar)
+    }
 
     const mappedFaqs = faqsData.length > 0
       ? faqsData.map((f) => ({
@@ -159,7 +193,7 @@ export const refreshData = async () => {
             status: isRejected ? "rejected" : (q.isClosed ? "answered" : q.moderationStatus),
             warnings: 0,
             flagged: q.isModerated || false,
-            adminReply: "",
+            adminReply: q.latestAnswer ? q.latestAnswer.content : "",
             aiAnswer: "",
             createdAt: new Date(q.createdAt).getTime(),
           };
@@ -228,7 +262,12 @@ export const addQuery = async (q) => {
       "Content-Type": "application/json",
       Authorization: `Bearer ${token}`,
     },
-    body: JSON.stringify({ title: q.title, content: q.body }),
+    body: JSON.stringify({
+      title: q.title,
+      content: q.body,
+      adminReviewRequested: q.requestAdminReview || false,
+      adminReviewBetSp: q.betSp || 0
+    }),
   });
   if (!res.ok) {
     const err = await res.json();
@@ -258,6 +297,36 @@ export const addQuery = async (q) => {
   };
 };
 
+export const deleteQuery = async (id) => {
+  const token = localStorage.getItem(LS_TOKEN);
+  const res = await fetch(`${API_URL}/api/questions/${id}`, {
+    method: "DELETE",
+    headers: {
+      Authorization: `Bearer ${token}`,
+    },
+  });
+  if (!res.ok) {
+    const err = await res.json();
+    throw new Error(err.message || "Failed to delete query");
+  }
+
+  // Remove from local storage arrays if present
+  try {
+    let myQueries = JSON.parse(localStorage.getItem(LS_MY_QUERIES) || "[]");
+    localStorage.setItem(LS_MY_QUERIES, JSON.stringify(myQueries.filter(qId => qId !== id)));
+    
+    let rejected = JSON.parse(localStorage.getItem(LS_REJECTED_QUERIES) || "[]");
+    localStorage.setItem(LS_REJECTED_QUERIES, JSON.stringify(rejected.filter(qId => qId !== id)));
+  } catch {}
+
+  // Update local state immediately
+  state.queries = state.queries.filter((q) => q.id !== id);
+  emit();
+  
+  // Refresh backend state
+  refreshData();
+};
+
 export const updateQuery = async (id, patch) => {
   const token = localStorage.getItem(LS_TOKEN);
 
@@ -276,36 +345,38 @@ export const updateQuery = async (id, patch) => {
     }
   }
 
-  // Handle direct approvals (button clicks)
-  if (patch.status === "approved") {
+  // Handle direct approvals & rejections
+  if (patch.status === "approved" || patch.status === "rejected") {
     const curQuery = state.queries.find((q) => q.id === id);
     if (curQuery && curQuery.route === "personal" && curQuery.status === "pending") {
-      let answerContent = curQuery.adminFeedback || "Query approved by administrator.";
+      let answerContent = patch.adminReply || curQuery.adminFeedback || (patch.status === "approved" ? "Query approved by administrator." : "Query rejected by administrator.");
       const res = await fetch(`${API_URL}/api/admin/moderation/personal/${id}/review`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify({ answerContent }),
+        body: JSON.stringify({ 
+          answerContent, 
+          isValid: patch.isValid !== undefined ? patch.isValid : (patch.status === "approved") 
+        }),
       });
       if (!res.ok) {
         const err = await res.json();
-        throw new Error(err.message || "Failed to approve query");
+        throw new Error(err.message || `Failed to ${patch.status} query`);
       }
     }
-  }
 
-  // Handle direct rejections (button clicks)
-  if (patch.status === "rejected") {
-    let rejectedIds = [];
-    try {
-      const raw = localStorage.getItem(LS_REJECTED_QUERIES);
-      if (raw) rejectedIds = JSON.parse(raw);
-    } catch {}
-    if (!rejectedIds.includes(id)) {
-      rejectedIds.push(id);
-      localStorage.setItem(LS_REJECTED_QUERIES, JSON.stringify(rejectedIds));
+    if (patch.status === "rejected") {
+      let rejectedIds = [];
+      try {
+        const raw = localStorage.getItem(LS_REJECTED_QUERIES);
+        if (raw) rejectedIds = JSON.parse(raw);
+      } catch {}
+      if (!rejectedIds.includes(id)) {
+        rejectedIds.push(id);
+        localStorage.setItem(LS_REJECTED_QUERIES, JSON.stringify(rejectedIds));
+      }
     }
   }
 
@@ -340,6 +411,7 @@ export const addAnswer = async (threadId, body, author = "@you") => {
 
   // Fetch thread details to refresh answers list
   await fetchQuestionDetails(threadId);
+  await refreshData();
   return savedAnswer;
 };
 
@@ -427,6 +499,61 @@ export const searchFaqs = (query) => {
   }
 
   return lastMatches;
+};
+
+/**
+ * Checks whether a given query text semantically matches any existing FAQ.
+ * Returns { isDuplicate, isNearMatch, score, matchedFaq } where:
+ *   isDuplicate  = score >= 80 → hard block (question already answered)
+ *   isNearMatch  = score >= 50 → soft warn (similar but let user decide)
+ */
+export const checkFaqSimilarity = async (query) => {
+  if (!query || !query.trim()) return { isDuplicate: false, isNearMatch: false, score: 0, matchedFaq: null };
+  try {
+    const res = await fetch(`${API_URL}/api/faqs/search`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ query }),
+    });
+    if (!res.ok) return { isDuplicate: false, isNearMatch: false, score: 0, matchedFaq: null };
+    const data = await res.json();
+    const best = data.suggestions && data.suggestions[0];
+    if (!best) return { isDuplicate: false, isNearMatch: false, score: 0, matchedFaq: null };
+    const score = Math.round(best.score * 100);
+    return {
+      isDuplicate: score >= 80,
+      isNearMatch: score >= 50 && score < 80,
+      score,
+      matchedFaq: { id: best.faqId, q: best.question, a: best.answer, match: score },
+    };
+  } catch (e) {
+    console.error("Error checking FAQ similarity:", e);
+    return { isDuplicate: false, isNearMatch: false, score: 0, matchedFaq: null };
+  }
+};
+
+/**
+ * Checks text for toxicity via the backend AI screening.
+ * Returns { isToxic: boolean, reason: string | null }
+ */
+export const checkToxicity = async (text) => {
+  if (!text || !text.trim()) return { isToxic: false };
+  try {
+    const res = await fetch(`${API_URL}/api/questions/analyze-toxicity`, {
+      method: "POST",
+      headers: { ...getAuthHeaders(), "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    if (!res.ok) return { isToxic: false };
+    const data = await res.json();
+    return {
+      isToxic: !!data.isToxic,
+      reason: data.reason || "Content flagged by moderation filters.",
+    };
+  } catch (e) {
+    console.error("Error checking toxicity:", e);
+    return { isToxic: false };
+  }
 };
 
 // Auth
@@ -536,4 +663,36 @@ export const markNotificationRead = async (id) => {
     );
     emit();
   }
+};
+
+// Bookmarks logic (LocalStorage Mock)
+const LS_BOOKMARKS = "yaksha.bookmarks.v1";
+
+export const getBookmarks = () => {
+  try {
+    return JSON.parse(localStorage.getItem(LS_BOOKMARKS) || "[]");
+  } catch {
+    return [];
+  }
+};
+
+export const hasBookmark = (id) => {
+  return getBookmarks().some((b) => b.id === id);
+};
+
+export const toggleBookmark = (item) => {
+  let bookmarks = getBookmarks();
+  if (bookmarks.some((b) => b.id === item.id)) {
+    bookmarks = bookmarks.filter((b) => b.id !== item.id);
+  } else {
+    // Save minimal representation of the thread/query
+    bookmarks.push({
+      id: item.id || item._id,
+      title: item.title || item.q || item.content,
+      type: item.route || "community",
+    });
+  }
+  localStorage.setItem(LS_BOOKMARKS, JSON.stringify(bookmarks));
+  // Emit state so Profile re-renders if we add listeners, but for now Profile fetches on mount
+  return hasBookmark(item.id);
 };

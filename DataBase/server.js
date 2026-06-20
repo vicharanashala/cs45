@@ -1,14 +1,14 @@
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
-const connectDB = require("./config/db");
+const connectDB = require("./db");
 
 // ── Route imports ─────────────────────────────────────────────────────────────
-const userRoutes     = require("./routes/users");
-const questionRoutes = require("./routes/questions");
-const answerRoutes   = require("./routes/answers");
-const faqRoutes      = require("./routes/faqs");
-const feedbackRoutes = require("./routes/feedback");
+const userRoutes     = require("./users");
+const questionRoutes = require("./questions");
+const answerRoutes   = require("./answers");
+const faqRoutes      = require("./faqs");
+const feedbackRoutes = require("./feedback");
 
 const app = express();
 

@@ -1,7 +1,39 @@
+import { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { motion } from "motion/react";
 import { Bookmark, History, Award, TrendingUp, MessageSquare, Check } from "lucide-react";
+import { store, getAuth, getBookmarks } from "@/lib/mockStore";
 
 export function Profile({ user }) {
+  const nav = useNavigate();
+  const [state, setState] = useState(store.get());
+  const [bookmarks, setBookmarks] = useState([]);
+
+  useEffect(() => {
+    const unsub = store.subscribe((s) => setState(s));
+    
+    // Load local bookmarks
+    setBookmarks(getBookmarks());
+
+    // try fetch backend bookmarks if logged in
+    const token = localStorage.getItem("yaksha.token.v1");
+    if (token) {
+      fetch(`${import.meta.env.VITE_API_URL || "http://localhost:5001"}/api/users/bookmarks`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then((r) => (r.ok ? r.json() : []))
+        .then((b) => {
+          if (b && b.length > 0) setBookmarks(b);
+        })
+        .catch(() => {});
+    }
+    return () => unsub();
+  }, []);
+
+  const myQueries = state.queries || [];
+  const myAnswers = state.answers || [];
+  const notifications = state.notifications || [];
+
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <motion.div
@@ -18,8 +50,8 @@ export function Profile({ user }) {
           <p className="text-sm text-muted-foreground">{user.handle} · CSE '26</p>
           <div className="mt-4 grid grid-cols-3 gap-3 text-center">
             <Mini label="SP" value={user.sp} />
-            <Mini label="Posts" value={18} />
-            <Mini label="Answers" value={42} />
+            <Mini label="Posts" value={myQueries.length} />
+            <Mini label="Answers" value={myAnswers.filter((a) => a.status === "approved" || a.status === "approved").length} />
           </div>
           <div className="mt-5 p-3 rounded-xl bg-accent/60 text-accent-foreground">
             <div className="flex items-center gap-2 text-xs font-medium mb-1.5">
@@ -55,34 +87,54 @@ export function Profile({ user }) {
         </div>
 
         <Section icon={<Bookmark className="w-4 h-4" />} title="Bookmarks">
-          {[
-            "Internship reimbursement process — step by step",
-            "Best electives for CSE third year if I want to specialize in ML?",
-            "Library timings during exam week",
-          ].map((b) => (
-            <Row key={b}>
-              <Bookmark className="w-3.5 h-3.5 text-primary shrink-0" />
-              <span className="text-sm">{b}</span>
+          {bookmarks.length === 0 ? (
+            <Row>
+              <span className="text-sm text-muted-foreground">No bookmarks yet</span>
             </Row>
-          ))}
+          ) : (
+            bookmarks.map((b) => {
+              const id = b._id || b.id;
+              const title = b.title || b.question || b.name || b.label;
+              const inMyQueries = myQueries.some((q) => q.id === id);
+              
+              return (
+                <Row key={id}>
+                  <Bookmark className="w-3.5 h-3.5 text-primary shrink-0" />
+                  <button 
+                    onClick={() => {
+                      if (inMyQueries) {
+                        nav("/my-queries", { state: { scrollTo: id } });
+                      } else {
+                        nav("/", { state: { view: "community", scrollTo: id } });
+                      }
+                    }}
+                    className="text-sm text-left hover:text-primary transition-colors cursor-pointer"
+                  >
+                    {title}
+                  </button>
+                </Row>
+              );
+            })
+          )}
         </Section>
 
         <Section icon={<History className="w-4 h-4" />} title="Activity log">
-          {[
-            { t: "2h", a: "Upvoted", b: "Hostel mess timings changed again" },
-            { t: "1d", a: "Posted", b: "How to register for the AI/ML elective?" },
-            { t: "3d", a: "Answer accepted", b: "Wi-Fi config for hostel block B" },
-            { t: "1w", a: "Earned badge", b: "Helpful Hand (10 accepted answers)" },
-          ].map((l, i) => (
-            <Row key={i}>
-              <span className="text-[11px] tabular-nums text-muted-foreground w-8 shrink-0">
-                {l.t}
-              </span>
-              <span className="text-xs font-semibold text-primary shrink-0">{l.a}</span>
-              <span className="text-sm text-muted-foreground truncate">{l.b}</span>
-              <Check className="ml-auto w-3.5 h-3.5 text-success/70 shrink-0" />
+          {notifications.length === 0 ? (
+            <Row>
+              <span className="text-sm text-muted-foreground">No recent activity</span>
             </Row>
-          ))}
+          ) : (
+            notifications.slice(0, 10).map((n) => (
+              <Row key={n._id || n.id}>
+                <span className="text-[11px] tabular-nums text-muted-foreground w-20 shrink-0">
+                  {new Date(n.createdAt || n.created || Date.now()).toLocaleString()}
+                </span>
+                <span className="text-xs font-semibold text-primary shrink-0">{n.title || n.type || n.action || 'Activity'}</span>
+                <span className="text-sm text-muted-foreground truncate">{n.message || n.content || n.body || ''}</span>
+                <Check className="ml-auto w-3.5 h-3.5 text-success/70 shrink-0" />
+              </Row>
+            ))
+          )}
         </Section>
       </div>
     </div>

@@ -1,8 +1,8 @@
 const express = require("express");
 const router = express.Router();
-const Feedback = require("../models/Feedback");
-const FaqElement = require("../models/FaqElement");
-const User = require("../models/User");
+const Feedback = require("./Feedback");
+const FaqElement = require("./FaqElement");
+const User = require("./User");
 
 // ─── POST /feedback ───────────────────────────────────────────────────────────
 // Store helpful / not_helpful signal from a user for a FAQ (Riddhima's endpoint)

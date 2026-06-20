@@ -1,19 +1,31 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { motion } from "motion/react";
 import { MoreHorizontal, Inbox, Flag, Send, Ban, Shield, TrendingDown } from "lucide-react";
-import { personalTickets, flagged } from "./mockData";
+import { flagged } from "./mockData";
+import { store, updateQuery } from "@/lib/mockStore";
+import { toast } from "sonner";
 
 export function AdminPanel() {
   const [queue, setQueue] = useState("personal");
-  const [active, setActive] = useState(personalTickets[0]);
+  const [state, setState] = useState(store.get());
+  const [active, setActive] = useState(null);
   const [reply, setReply] = useState("");
   const [resolved, setResolved] = useState([]);
 
+  useEffect(() => store.subscribe(setState), []);
+
+  const personalTickets = state.queries.filter(q => q.route === 'personal');
   const list = queue === "personal" ? personalTickets : flagged;
 
-  const resolve = (id) => {
-    setResolved((r) => [...r, id]);
-    setReply("");
+  const resolve = async (id, isValid = true) => {
+    try {
+      await updateQuery(id, { status: "approved", adminReply: reply, isValid });
+      setResolved((r) => [...r, id]);
+      setReply("");
+      toast.success("Ticket resolved");
+    } catch (e) {
+      toast.error(e.message);
+    }
   };
 
   return (
@@ -60,12 +72,12 @@ export function AdminPanel() {
                 }`}
               >
                 <div className="flex items-center justify-between mb-1">
-                  <span className="text-sm font-semibold truncate">{t.subject}</span>
-                  <SevDot s={t.severity} />
+                  <span className="text-sm font-semibold truncate">{queue === "personal" ? t.title : t.subject}</span>
+                  <SevDot s={t.severity || "medium"} />
                 </div>
                 <div className="flex items-center justify-between text-[11px] text-muted-foreground">
-                  <span>{t.user}</span>
-                  <span>{t.age} ago</span>
+                  <span>{queue === "personal" ? t.user.handle : t.user}</span>
+                  <span>{queue === "personal" ? new Date(t.createdAt).toLocaleDateString() : t.age}</span>
                 </div>
                 {resolved.includes(t.id) && (
                   <span className="mt-1.5 inline-block px-1.5 py-0.5 rounded text-[10px] font-semibold bg-success/15 text-success">
@@ -93,10 +105,10 @@ export function AdminPanel() {
                       {queue === "personal" ? "Private ticket" : "Flagged content"}
                     </span>
                     <span className="text-xs text-muted-foreground">
-                      {active.user} · {active.age} ago
+                      {queue === "personal" ? active.user.handle : active.user} · {queue === "personal" ? new Date(active.createdAt).toLocaleDateString() : active.age}
                     </span>
                   </div>
-                  <h3 className="font-display text-xl font-semibold">{active.subject}</h3>
+                  <h3 className="font-display text-xl font-semibold">{queue === "personal" ? active.title : active.subject}</h3>
                 </div>
                 <button className="p-2 rounded-lg hover:bg-secondary">
                   <MoreHorizontal className="w-4 h-4" />
@@ -106,6 +118,13 @@ export function AdminPanel() {
               <div className="p-4 rounded-xl bg-secondary/50 border border-border text-sm leading-relaxed">
                 {active.body}
               </div>
+              
+              {queue === "personal" && active.adminReviewBetSp > 0 && (
+                <div className="p-3 bg-primary/10 border border-primary/30 rounded-xl">
+                  <span className="text-xs font-bold uppercase tracking-wider text-primary">SP Bet Attached</span>
+                  <p className="text-sm mt-1">This user bet <b>{active.adminReviewBetSp} SP</b> that this query is new and valid.</p>
+                </div>
+              )}
 
               {queue === "personal" ? (
                 <div className="space-y-3">
@@ -122,15 +141,34 @@ export function AdminPanel() {
 
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] text-muted-foreground">
-                      Sent privately to {active.user} — never appears on the public feed.
+                      Sent privately to {active.user.handle}.
                     </span>
-                    <button
-                      disabled={!reply.trim()}
-                      onClick={() => resolve(active.id)}
-                      className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-primary text-primary-foreground text-sm font-medium shadow-glow disabled:opacity-40"
-                    >
-                      <Send className="w-3.5 h-3.5" /> Resolve & Notify
-                    </button>
+                    {active.adminReviewBetSp > 0 ? (
+                      <div className="flex gap-2">
+                         <button
+                           disabled={!reply.trim()}
+                           onClick={() => resolve(active.id, false)}
+                           className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-destructive text-destructive-foreground text-sm font-medium disabled:opacity-40"
+                         >
+                           Invalid (-SP)
+                         </button>
+                         <button
+                           disabled={!reply.trim()}
+                           onClick={() => resolve(active.id, true)}
+                           className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-success text-success-foreground text-sm font-medium disabled:opacity-40"
+                         >
+                           <Send className="w-3.5 h-3.5" /> Valid (+SP)
+                         </button>
+                      </div>
+                    ) : (
+                      <button
+                        disabled={!reply.trim()}
+                        onClick={() => resolve(active.id, true)}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-primary text-primary-foreground text-sm font-medium shadow-glow disabled:opacity-40"
+                      >
+                        <Send className="w-3.5 h-3.5" /> Resolve & Notify
+                      </button>
+                    )}
                   </div>
                 </div>
               ) : (

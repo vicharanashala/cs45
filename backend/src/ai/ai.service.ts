@@ -41,27 +41,76 @@ export class AiService implements IAiService {
   }
 
   /**
-   * Evaluates input text for inappropriate content, profanity, or security policy bypass terms.
+   * Evaluates input text for inappropriate content using the Groq LLM API.
+   * Falls back to a keyword list if GROQ_API_KEY is not set or the API fails.
    */
   async analyzeToxicity(
     text: string,
   ): Promise<{ isToxic: boolean; reason?: string }> {
+    const apiKey = process.env.GROQ_API_KEY;
+
+    // ── Groq LLM check ─────────────────────────────────────────────────────
+    if (apiKey && apiKey !== 'your_groq_api_key_here') {
+      try {
+        const response = await fetch(
+          'https://api.groq.com/openai/v1/chat/completions',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model: 'llama-3.1-8b-instant',
+              messages: [
+                {
+                  role: 'system',
+                  content:
+                    'You are an insanely strict, highly conservative content moderation assistant for a university campus forum. ' +
+                    'Evaluate the following text. You MUST flag the text as toxic (isToxic: true) if it contains ' +
+                    'ANY swearing, curse words, profanity, hate speech, harassment, OR targetting of any intern or individual. ' +
+                    'You MUST ALSO flag ANY mild swear words (e.g., "hell", "damn", "crap", "stupid") and ANY negative connotations, complaining, or disrespectful tone. ' +
+                    'Zero tolerance policy. Even the slightest hint of negativity, mild swearing, or subtle bullying must be flagged immediately. ' +
+                    'Respond ONLY with a JSON object in this exact format: ' +
+                    '{"isToxic": true/false, "reason": "short explanation or null"}',
+                },
+                { role: 'user', content: text },
+              ],
+              temperature: 0,
+              max_tokens: 100,
+            }),
+          },
+        );
+
+        if (response.ok) {
+          const data = await response.json();
+          const raw = data.choices?.[0]?.message?.content?.trim() ?? '';
+          // Extract JSON even if wrapped in markdown code fences
+          const jsonMatch = raw.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            return {
+              isToxic: !!parsed.isToxic,
+              reason: parsed.reason ?? undefined,
+            };
+          }
+        }
+      } catch {
+        // Fall through to keyword fallback
+      }
+    }
+
+    // ── Keyword fallback ────────────────────────────────────────────────────
     const clean = (text || '').toLowerCase();
     const toxicWords = [
-      'abuse',
-      'harass',
-      'nigger',
-      'faggot',
-      'retard',
-      'kill yourself',
-      'kys',
-      'fuck you',
-      'bitch',
-      'asshole',
-      'bastard',
-      'hack the database',
-      'sql injection',
-      'xss bypass',
+      'abuse', 'harass', 'nigger', 'faggot', 'retard',
+      'kill yourself', 'kys', 'fuck', 'bitch', 'asshole',
+      'bastard', 'shit', 'cunt', 'dick', 'slut', 'whore',
+      'dumbass', 'moron', 'idiot', 'loser', 'suck',
+      'hell', 'damn', 'crap', 'stupid', 'hate', 'terrible',
+      'awful', 'worst', 'useless', 'trash', 'garbage', 'bs',
+      'bullshit', 'sucks', 'pathetic', 'worthless',
+      'hack the database', 'sql injection', 'xss bypass',
       'exploit systems',
     ];
 
@@ -69,7 +118,7 @@ export class AiService implements IAiService {
       if (clean.includes(word)) {
         return {
           isToxic: true,
-          reason: `Flagged due to toxic/inappropriate language: "${word}"`,
+          reason: `Flagged due to inappropriate language: "${word}"`,
         };
       }
     }
@@ -77,13 +126,62 @@ export class AiService implements IAiService {
     return { isToxic: false };
   }
 
-  /**
-   * Classifies a user query as 'personal' or 'generic'.
-   * Personal queries contain sensitive contact, credentials, invoice IDs, or explicit personal billing topics.
-   */
   async classifyQuery(
     text: string,
   ): Promise<{ type: 'generic' | 'personal'; confidence: number }> {
+    const apiKey = process.env.GROQ_API_KEY;
+
+    // ── Groq LLM check ─────────────────────────────────────────────────────
+    if (apiKey && apiKey !== 'your_groq_api_key_here') {
+      try {
+        const response = await fetch(
+          'https://api.groq.com/openai/v1/chat/completions',
+          {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify({
+              model: 'llama-3.1-8b-instant',
+              messages: [
+                {
+                  role: 'system',
+                  content:
+                    'You are a routing assistant for a university campus forum. ' +
+                    'Classify the following text as "personal" or "generic". ' +
+                    'A query is "personal" if it contains personal words, sensitive topics (like family), ' +
+                    'contact info, credentials, invoice IDs, explicit billing topics, or requires admin privacy. ' +
+                    'A query is "generic" if it is a general question suitable for a public community board. ' +
+                    'Respond ONLY with a JSON object in this exact format: ' +
+                    '{"type": "personal" or "generic", "confidence": a number between 0.0 and 1.0}',
+                },
+                { role: 'user', content: text },
+              ],
+              temperature: 0,
+              max_tokens: 100,
+            }),
+          },
+        );
+
+        if (response.ok) {
+          const data = await response.json();
+          const raw = data.choices?.[0]?.message?.content?.trim() ?? '';
+          const jsonMatch = raw.match(/\{[\s\S]*\}/);
+          if (jsonMatch) {
+            const parsed = JSON.parse(jsonMatch[0]);
+            return {
+              type: parsed.type === 'personal' ? 'personal' : 'generic',
+              confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0.9,
+            };
+          }
+        }
+      } catch {
+        // Fall through to regex/keyword fallback
+      }
+    }
+
+    // ── Keyword fallback ────────────────────────────────────────────────────
     const clean = (text || '').toLowerCase();
 
     // Check patterns for email addresses, credit cards, SSN, or billing IDs
@@ -108,6 +206,13 @@ export class AiService implements IAiService {
       'refund my order',
       'my private email',
       'my phone number',
+      'my family',
+      'my mom',
+      'my dad',
+      'my sister',
+      'my brother',
+      'sensitive',
+      'private',
     ];
 
     let matchCount = 0;

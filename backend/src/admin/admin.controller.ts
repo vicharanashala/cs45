@@ -57,12 +57,12 @@ export class AdminController {
   @Post('moderation/personal/:id/review')
   @ApiOperation({ summary: '[Admin/Moderator] Respond to and resolve a personal query' })
   @ApiParam({ name: 'id', description: 'Personal query ID to review' })
-  @ApiBody({ schema: { example: { answerContent: 'We have investigated your issue and...' } } })
+  @ApiBody({ schema: { example: { answerContent: 'We have investigated your issue and...', isValid: true } } })
   @ApiResponse({ status: 200, description: 'Query resolved. User notified via notification.' })
   async reviewPersonal(
     @Req() req: any,
     @Param('id') id: string,
-    @Body() body: { answerContent: string },
+    @Body() body: { answerContent: string; isValid?: boolean },
   ) {
     return this.adminService.reviewPersonalQuery(req.user._id, id, body);
   }

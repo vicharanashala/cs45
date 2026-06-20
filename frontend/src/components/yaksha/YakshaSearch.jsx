@@ -13,11 +13,15 @@ export function YakshaSearch({ onAskCommunity }) {
   const [feedback, setFeedback] = useState({});
   const [sectionFilter, setSectionFilter] = useState("All");
   const [storeState, setStoreState] = useState(store.get());
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
 
-  useEffect(() => store.subscribe(setStoreState), []);
+  useEffect(() => store.subscribe((s) => {
+    setStoreState(s);
+    setIsAnalyzing(false); // results arrived — stop spinner
+  }), []);
 
   const isSearching = q.trim().length > 1;
-  const matches = useMemo(() => (isSearching ? searchFaqs(q) : []), [q, isSearching]);
+  const matches = useMemo(() => (isSearching ? searchFaqs(q) : []), [q, isSearching, storeState]);
 
   const faqsList = storeState.faqs && storeState.faqs.length > 0 ? storeState.faqs : faqs;
 
@@ -49,12 +53,18 @@ export function YakshaSearch({ onAskCommunity }) {
           <Search className="w-5 h-5 text-muted-foreground shrink-0" />
           <input
             value={q}
-            onChange={(e) => { setQ(e.target.value); setExpanded(null); }}
+            onChange={(e) => {
+              const val = e.target.value;
+              setQ(val);
+              setExpanded(null);
+              if (val.trim().length > 1) setIsAnalyzing(true);
+              else setIsAnalyzing(false);
+            }}
             placeholder="Search the FAQ — e.g. NOC, stipend, Zoom link…"
             className="flex-1 bg-transparent outline-none text-base placeholder:text-muted-foreground"
           />
           {q && (
-            <button onClick={() => setQ("")} className="text-xs text-muted-foreground hover:text-foreground">clear</button>
+            <button onClick={() => { setQ(""); setIsAnalyzing(false); }} className="text-xs text-muted-foreground hover:text-foreground">clear</button>
           )}
           <kbd className="hidden md:inline-flex h-6 px-2 items-center rounded-md bg-secondary text-[10px] font-mono text-muted-foreground border border-border">⌘ K</kbd>
         </div>
@@ -65,34 +75,60 @@ export function YakshaSearch({ onAskCommunity }) {
               className="mt-3 bg-card border border-border rounded-2xl shadow-elegant overflow-hidden">
               <div className="flex items-center justify-between px-5 py-3 border-b border-border bg-muted/40">
                 <div className="flex items-center gap-2">
-                  <span className="relative flex h-2 w-2">
-                    <span className="absolute inline-flex h-full w-full rounded-full bg-primary opacity-60 animate-pulse-ring" />
-                    <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-                  </span>
-                  <span className="text-xs font-medium text-muted-foreground">
-                    {matches.length} similar question{matches.length === 1 ? "" : "s"} found
-                  </span>
+                  {isAnalyzing ? (
+                    <>
+                      <span className="relative flex h-2 w-2">
+                        <span className="absolute inline-flex h-full w-full rounded-full bg-primary opacity-60 animate-ping" />
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+                      </span>
+                      <span className="text-xs font-medium text-muted-foreground">Analyzing semantics…</span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="relative flex h-2 w-2">
+                        <span className="absolute inline-flex h-full w-full rounded-full bg-primary opacity-60 animate-pulse-ring" />
+                        <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+                      </span>
+                      <span className="text-xs font-medium text-muted-foreground">
+                        {matches.length} similar question{matches.length === 1 ? "" : "s"} found
+                      </span>
+                    </>
+                  )}
                 </div>
-                <span className="text-[11px] font-mono text-muted-foreground">vector match</span>
+                <span className="text-[11px] font-mono text-muted-foreground">semantic · vector match</span>
               </div>
 
-              {matches.length === 0 ? (
+              {isAnalyzing ? (
+                <div className="px-5 py-8 text-center text-sm text-muted-foreground">
+                  <div className="inline-flex items-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: '0ms' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: '150ms' }} />
+                    <span className="w-1.5 h-1.5 rounded-full bg-primary/60 animate-bounce" style={{ animationDelay: '300ms' }} />
+                  </div>
+                  <p className="mt-2 text-xs">Running semantic similarity search…</p>
+                </div>
+              ) : matches.length === 0 ? (
                 <div className="px-5 py-8 text-center text-sm text-muted-foreground">
                   No similar FAQ matched. You can draft a new question.
                 </div>
               ) : (
                 <div className="divide-y divide-border">
                   {matches.map((s) => {
-                    const high = s.match >= 60;
+                    const tier = s.match >= 80 ? "high" : s.match >= 50 ? "mid" : "low";
+                    const tierStyle = {
+                      high: { badge: "bg-success/15 text-success border border-success/30", dot: "bg-success" },
+                      mid:  { badge: "bg-warning/15 text-warning-foreground border border-warning/30", dot: "bg-warning" },
+                      low:  { badge: "bg-secondary text-muted-foreground border border-border", dot: "bg-muted-foreground" },
+                    }[tier];
                     const isOpen = expanded === s.id;
                     const fb = feedback[s.id] ?? "none";
                     return (
                       <div key={s.id}>
                         <button onClick={() => { setExpanded(isOpen ? null : s.id); setFb(s.id, "none"); }}
                           className="w-full text-left px-5 py-4 flex items-center gap-4 hover:bg-secondary/60 transition-colors">
-                          <span className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold tabular-nums ${high ? "bg-success/15 text-success" : "bg-warning/20 text-warning-foreground"}`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${high ? "bg-success" : "bg-warning"}`} />
-                            {s.match}% Match
+                          <span className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold tabular-nums ${tierStyle.badge}`}>
+                            <span className={`w-1.5 h-1.5 rounded-full ${tierStyle.dot}`} />
+                            {s.match}% match
                           </span>
                           <span className="flex-1 text-sm font-medium">{s.q}</span>
                           <span className="text-[11px] text-muted-foreground hidden sm:inline">{s.section}</span>
@@ -103,6 +139,23 @@ export function YakshaSearch({ onAskCommunity }) {
                             <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: "auto", opacity: 1 }} exit={{ height: 0, opacity: 0 }}
                               transition={{ duration: 0.25 }} className="overflow-hidden bg-gradient-to-b from-secondary/40 to-transparent">
                               <div className="px-5 py-5 space-y-4">
+                                {/* Score breakdown bar */}
+                                <div className="space-y-1.5">
+                                  <div className="flex items-center justify-between text-[11px] text-muted-foreground">
+                                    <span>Semantic confidence</span>
+                                    <span className="font-bold tabular-nums" style={{
+                                      color: tier === 'high' ? 'var(--color-success)' : tier === 'mid' ? 'hsl(38 92% 50%)' : undefined
+                                    }}>{s.match}%</span>
+                                  </div>
+                                  <div className="h-1.5 rounded-full bg-secondary overflow-hidden">
+                                    <div
+                                      className={`h-full rounded-full transition-all ${
+                                        tier === 'high' ? 'bg-success' : tier === 'mid' ? 'bg-warning' : 'bg-muted-foreground/40'
+                                      }`}
+                                      style={{ width: `${s.match}%` }}
+                                    />
+                                  </div>
+                                </div>
                                 <p className="text-sm leading-relaxed text-foreground/85 whitespace-pre-line">{s.a}</p>
                                 {fb === "none" ? (
                                   <div className="flex items-center justify-between gap-3 p-3 rounded-xl bg-card border border-border">

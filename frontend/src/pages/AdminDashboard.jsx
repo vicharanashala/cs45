@@ -14,6 +14,7 @@ export default function AdminDashboard() {
   const { user } = useAuth();
   const nav = useNavigate();
   const [tab, setTab] = useState("queries");
+  const [activeAiId, setActiveAiId] = useState(null);
   const [state, setState] = useState(store.get());
 
   useEffect(() => store.subscribe(setState), []);
@@ -21,6 +22,9 @@ export default function AdminDashboard() {
   const personalQueries = state.queries.filter((q) => q.route === "personal" && !q.flagged);
   const flaggedQueries = state.queries.filter((q) => q.flagged);
   const allQueries = state.queries;
+  const aiPanelQueries = state.queries.filter((q) => 
+    q.route === "community" || q.route === "generic" || (q.route === "personal" && q.status === "approved")
+  );
   const pendingAnswers = state.answers.filter((a) => a.status === "pending");
 
   const logout = () => { signOut(); nav("/admin/login"); };
@@ -46,7 +50,7 @@ export default function AdminDashboard() {
                 { id: "queries", l: "All Queries", n: allQueries.length },
                 { id: "answers", l: "Pending Answers", n: pendingAnswers.length },
                 { id: "personal", l: "Personal & Flagged", n: personalQueries.length + flaggedQueries.length },
-                { id: "ai", l: "AI Answer", n: null },
+                { id: "ai", l: "Query Resolution", n: null },
               ].map((t) => (
                 <button key={t.id} onClick={() => setTab(t.id)}
                   className={`relative px-3.5 py-1.5 font-medium rounded-lg transition-colors ${tab === t.id ? "text-foreground" : "text-muted-foreground hover:text-foreground"}`}>
@@ -65,10 +69,10 @@ export default function AdminDashboard() {
         </header>
 
         <main className="mx-auto max-w-7xl px-6 py-10">
-          {tab === "queries" && <AllQueries items={allQueries} />}
+          {tab === "queries" && <AllQueries items={allQueries} setTab={setTab} setActiveAiId={setActiveAiId} />}
           {tab === "answers" && <AnswerApproval items={pendingAnswers} threads={state.threads} />}
           {tab === "personal" && <PersonalFlagged personal={personalQueries} flagged={flaggedQueries} />}
-          {tab === "ai" && <AIPanel items={allQueries} />}
+          {tab === "ai" && <AIPanel items={aiPanelQueries} activeId={activeAiId} setActiveId={setActiveAiId} threads={state.threads} />}
         </main>
       </div>
     </div>
@@ -76,7 +80,7 @@ export default function AdminDashboard() {
 }
 
 // ─────────── All Queries with approve/reject + feedback bar ───────────
-function AllQueries({ items }) {
+function AllQueries({ items, setTab, setActiveAiId }) {
   const [active, setActive] = useState(null);
   const cur = items.find((q) => q.id === active);
   const [feedback, setFeedback] = useState("");
@@ -121,28 +125,56 @@ function AllQueries({ items }) {
             </div>
             <p className="text-sm text-muted-foreground line-clamp-2">{q.body}</p>
             <div className="flex gap-2 mt-3" onClick={(e) => e.stopPropagation()}>
-              <button
-                onClick={() => decide(q.id, "approved")}
-                disabled={q.status === "approved" || q.status === "answered"}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  q.status === "approved" || q.status === "answered"
-                    ? "bg-success/20 text-success cursor-default opacity-80"
-                    : "bg-success text-success-foreground hover:bg-success/90"
-                }`}
-              >
-                <Check className="w-3.5 h-3.5" /> {q.status === "approved" || q.status === "answered" ? "Approved" : "Approve"}
-              </button>
-              <button
-                onClick={() => decide(q.id, "rejected")}
-                disabled={q.status === "rejected"}
-                className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
-                  q.status === "rejected"
-                    ? "bg-destructive/20 text-destructive cursor-default opacity-80"
-                    : "bg-destructive text-destructive-foreground hover:bg-destructive/90"
-                }`}
-              >
-                <X className="w-3.5 h-3.5" /> {q.status === "rejected" ? "Rejected" : "Reject"}
-              </button>
+              {q.route === "personal" ? (
+                <>
+                  <button
+                    onClick={() => {
+                      decide(q.id, "approved");
+                      setActiveAiId(q.id);
+                      setTab("ai");
+                    }}
+                    disabled={q.status === "approved" || q.status === "answered"}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      q.status === "approved" || q.status === "answered"
+                        ? "bg-success/20 text-success cursor-default opacity-80"
+                        : "bg-success text-success-foreground hover:bg-success/90"
+                    }`}
+                  >
+                    <Check className="w-3.5 h-3.5" /> Accept &amp; Resolve
+                  </button>
+                  <button
+                    onClick={() => {
+                      decide(q.id, "rejected");
+                      setActiveAiId(q.id);
+                      setTab("ai");
+                    }}
+                    disabled={q.status === "rejected"}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                      q.status === "rejected"
+                        ? "bg-destructive/20 text-destructive cursor-default opacity-80"
+                        : "bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    }`}
+                  >
+                    <X className="w-3.5 h-3.5" /> Reject &amp; Resolve
+                  </button>
+                </>
+              ) : (
+                <>
+                  <span className="inline-flex items-center gap-1 text-xs text-muted-foreground mr-auto bg-secondary px-2 py-1 rounded-md">
+                    <Check className="w-3 h-3 text-success" />
+                    {store.get().answers.filter(a => a.threadId === q.id && a.isAccepted).length} Verified Answers
+                  </span>
+                  <button
+                    onClick={() => {
+                      updateQuery(q.id, { flagged: true });
+                      toast.success("Query flagged for review");
+                    }}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium bg-destructive/10 text-destructive hover:bg-destructive/20 transition-all"
+                  >
+                    <Flag className="w-3.5 h-3.5" /> Flag
+                  </button>
+                </>
+              )}
             </div>
           </motion.button>
         ))}
@@ -247,8 +279,9 @@ function PersonalFlagged({ personal, flagged }) {
 }
 
 // ─────────── AI Answer generator: click query → generate ───────────
-function AIPanel({ items }) {
-  const [activeId, setActiveId] = useState(null);
+import { addAnswer } from "@/lib/mockStore";
+
+function AIPanel({ items, activeId, setActiveId, threads }) {
   const [draft, setDraft] = useState("");
   const [busy, setBusy] = useState(false);
   const cur = items.find((q) => q.id === activeId);
@@ -257,19 +290,51 @@ function AIPanel({ items }) {
     if (!cur) return;
     setBusy(true);
     setTimeout(() => {
-      setDraft(generateAIAnswer(cur));
+      if (cur.route === "generic" || cur.route === "community") {
+        const communityAnswers = threads.filter(a => a.threadId === cur.id);
+        if (communityAnswers.length > 0) {
+          setDraft(`Based on community consensus:\n\n${communityAnswers.map(a => `- ${a.body}`).join("\n")}`);
+        } else {
+          setDraft(generateAIAnswer(cur));
+        }
+      } else {
+        setDraft(generateAIAnswer(cur));
+      }
       setBusy(false);
     }, 600);
+  };
+
+  const addToFaqs = async () => {
+    if (!cur || !draft.trim()) return;
+    try {
+      const token = localStorage.getItem("yaksha.token.v1");
+      const res = await fetch(`${import.meta.env.VITE_API_URL || "http://localhost:5001"}/api/admin/summarize/${cur.id}`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      if (res.ok) {
+        toast.success("Query sent to AI FAQ generation queue!");
+      } else {
+        toast.success("Query summarized and added to FAQs (Mock)");
+      }
+      setDraft(""); setActiveId(null);
+    } catch (e) {
+      toast.success("Query summarized and added to FAQs (Mock)");
+    }
   };
 
   const send = async () => {
     if (!cur || !draft.trim()) return;
     try {
-      await updateQuery(cur.id, { adminReply: draft, aiAnswer: draft, status: "answered" });
-      toast.success("AI answer sent to student");
+      if (cur.route === "generic" || cur.route === "community") {
+        await addAnswer(cur.id, draft, "Admin");
+      } else {
+        await updateQuery(cur.id, { adminReply: draft, aiAnswer: draft, status: "answered" });
+      }
+      toast.success("AI answer posted");
       setDraft(""); setActiveId(null);
     } catch (err) {
-      toast.error(err.message || "Failed to send answer");
+      toast.error(err.message || "Failed to post answer");
     }
   };
 
@@ -312,8 +377,13 @@ function AIPanel({ items }) {
                   className="w-full bg-secondary/50 border border-border rounded-xl px-3 py-2 text-sm outline-none focus:ring-focus resize-none" />
                 <div className="flex gap-2">
                   <button onClick={send} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-success text-success-foreground text-sm font-medium">
-                    <Send className="w-3.5 h-3.5" /> Send to student
+                    <Send className="w-3.5 h-3.5" /> Post Response
                   </button>
+                  {(cur.route === "generic" || cur.route === "community") && (
+                    <button onClick={addToFaqs} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-primary text-primary-foreground text-sm font-medium">
+                      <Sparkles className="w-3.5 h-3.5" /> Add to FAQs
+                    </button>
+                  )}
                   <button onClick={generate} className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl border border-border text-sm">
                     <Wand2 className="w-3.5 h-3.5" /> Regenerate
                   </button>

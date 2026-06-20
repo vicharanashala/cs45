@@ -1,8 +1,8 @@
 const express = require("express");
 const router = express.Router();
-const Answer = require("../models/Answer");
-const Question = require("../models/Question");
-const User = require("../models/User");
+const Answer = require("./Answer");
+const Question = require("./Question");
+const User = require("./User");
 
 // ─── POST /answers ────────────────────────────────────────────────────────────
 // Submit an answer to a community question
