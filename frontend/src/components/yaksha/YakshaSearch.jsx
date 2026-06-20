@@ -90,10 +90,7 @@ export function YakshaSearch({ onAskCommunity }) {
                       <div key={s.id}>
                         <button onClick={() => { setExpanded(isOpen ? null : s.id); setFb(s.id, "none"); }}
                           className="w-full text-left px-5 py-4 flex items-center gap-4 hover:bg-secondary/60 transition-colors">
-                          <span className={`shrink-0 inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md text-[11px] font-semibold tabular-nums ${high ? "bg-success/15 text-success" : "bg-warning/20 text-warning-foreground"}`}>
-                            <span className={`w-1.5 h-1.5 rounded-full ${high ? "bg-success" : "bg-warning"}`} />
-                            {s.match}% Match
-                          </span>
+
                           <span className="flex-1 text-sm font-medium">{s.q}</span>
                           <span className="text-[11px] text-muted-foreground hidden sm:inline">{s.section}</span>
                           <ChevronDown className={`w-4 h-4 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`} />

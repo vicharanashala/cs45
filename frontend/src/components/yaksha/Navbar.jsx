@@ -70,11 +70,9 @@ export function Navbar({ user: navUser, active, onNavigate, isAdmin: adminProp, 
               )}
             </button>
           ))}
-          {isAdmin && (
-            <Link to="/admin" className="px-3.5 py-1.5 text-sm font-medium rounded-lg text-warning-foreground bg-warning/30 hover:bg-warning/40 inline-flex items-center gap-1">
-              <Shield className="w-3.5 h-3.5" /> Admin
-            </Link>
-          )}
+          <Link to="/admin/login" className="px-3.5 py-1.5 text-sm font-medium rounded-lg text-warning-foreground bg-warning/30 hover:bg-warning/40 inline-flex items-center gap-1">
+            <Shield className="w-3.5 h-3.5" /> Admin
+          </Link>
         </nav>
 
         <div className="flex-1" />
