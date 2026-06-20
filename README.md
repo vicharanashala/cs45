@@ -4,10 +4,13 @@ This repository contains a full-stack FAQ and community Q&A platform developed a
 
 The platform is designed to reduce repeated mentor queries, route sensitive questions away from public discussion, and convert high-quality community knowledge into reusable FAQ entries.
 
+This project was built during the Vicharanashala — Lab for Education Design internship, in association with the Indian Institute of Technology Ropar, from **26 May 2026 to 16 July 2026**.
+
 ## Table of Contents
 
 - [AI-Powered Crowd-Sourced Dynamic FAQ Platform](#ai-powered-crowd-sourced-dynamic-faq-platform)
   - [Table of Contents](#table-of-contents)
+  - [Team](#team)
   - [Project Overview](#project-overview)
   - [Core Features](#core-features)
   - [System Architecture](#system-architecture)
@@ -47,6 +50,19 @@ The platform is designed to reduce repeated mentor queries, route sensitive ques
   - [Known Integration Notes](#known-integration-notes)
   - [License](#license)
 
+## Team
+
+| Role | Member(s) |
+| --- | --- |
+| Project Lead / System Architect | Riddhima Deshmukh |
+| Frontend Team | Vidhi Luniya (DevOps & Deployment Lead), Venkata Vamsi Krishna Onteru (Frontend Team Manager) |
+| Backend / API Team | Lakshit Gupta (Backend Team Manager), Remy Baastin Rayappan, Madhav Rimal |
+| AI / NLP Team | Gurnoor Singh (AI Team Manager), Riddhima Deshmukh, Negha R, Samarpit Gujral |
+| Database Team | Damanpreet Singh (Database Lead) |
+| Research, Testing & Documentation Team | Gunjan Panjabi (Documentation Lead), Rishi Raval |
+
+Repository: [vicharanashala/cs45](https://github.com/vicharanashala/cs45)
+
 ## Project Overview
 
 The project is organized around four main layers:
@@ -61,9 +77,13 @@ The project is organized around four main layers:
 - JWT-based user registration, login, and protected sessions.
 - Role-based access control for users, moderators, and administrators.
 - FAQ browsing, similarity search, feedback collection, and bookmarking.
+- Semantic similarity matching against existing FAQs with an 80% confidence threshold: a match above this threshold shows the existing FAQ answer immediately, while a match at or below it unlocks new query submission for the logged-in user.
 - Community Q&A with questions, answers, voting, accepted answers, and saved posts.
 - Reputation points and notification generation for user activity.
-- Admin dashboards for analytics, personal query review, content moderation, and FAQ candidate approval.
+- SP (Spurti Points) betting on query priority: a user can stake SP to raise their query's position in the admin review queue. If the admin approves the query as genuinely worth prioritizing, the staked SP is returned doubled (+2x); if not, the staked SP is lost (−2x).
+- Request Admin Review escalation: once 10 users flag the same community query, it is automatically escalated to the admin queue.
+- Admin dashboards for analytics, personal query review, content moderation, FAQ candidate approval, and SP-related adjustments.
+- Tiered moderation policy: a first violation issues a warning, repeated violations lead to suspension, and severe violations result in a permanent ban.
 - Query classification into generic, personal, or inappropriate categories.
 - Vector search using embeddings and cosine similarity.
 - Automated FAQ generation from community answer threads.
@@ -311,7 +331,7 @@ The backend is a NestJS application located in `backend/`.
 | `users` | User profiles, leaderboard retrieval, reputation points, notification delivery, and bookmarks. |
 | `faqs` | Approved FAQ retrieval, vector FAQ search, manual FAQ creation, feedback, and FAQ bookmarks. |
 | `questions` | Community questions, answers, votes, accepted answers, toxicity screening, classification, and question bookmarks. |
-| `admin` | Analytics, user banning, personal query review, FAQ candidate moderation, and moderation audit logs. |
+| `admin` | Analytics, user banning, personal query review, FAQ candidate moderation, SP betting resolution on prioritized queries, moderation audit logs, and tiered enforcement (warning, suspension, permanent ban). |
 | `ai` | Local AI utilities for embeddings, toxicity checks, query classification, FAQ synthesis, and vector storage. |
 | `ai-search` | Search-specific API, embedding cache, external embedding client, and DTOs for indexed FAQ search. |
 | `common` | Shared types and cosine similarity utility functions. |
@@ -449,7 +469,7 @@ The frontend is located in `frontend/`. It is a React demonstration interface fo
 | `frontend/components/ui.jsx` | Shared UI primitives and toaster utility. |
 | `frontend/components/yaksha/YakshaSearch.jsx` | FAQ search interface and duplicate-prevention experience. |
 | `frontend/components/yaksha/Community.jsx` | Community Q&A feed, voting UI, question modal, and PII-style moderation demo. |
-| `frontend/components/yaksha/AdminPanel.jsx` | Admin moderation interface for personal tickets, flagged content, SP adjustment, and resolution actions. |
+| `frontend/components/yaksha/AdminPanel.jsx` | Admin moderation interface for personal tickets, flagged content, SP (Spurti Points) betting adjustments on prioritized queries, and resolution actions. |
 | `frontend/components/yaksha/Navbar.jsx` | Navigation bar and role toggle control. |
 | `frontend/components/yaksha/Profile.jsx` | User profile and contribution display. |
 | `frontend/components/yaksha/mockData.js` | Mock users, threads, FAQ matches, admin queues, and statistics for the frontend demo. |
@@ -640,11 +660,20 @@ AI search unit test coverage includes cosine similarity behavior under `backend/
 
 ## Known Integration Notes
 
-- The frontend currently uses mock data and demonstrates workflows rather than being fully wired to backend endpoints.
+- The frontend currently uses mock data and demonstrates workflows rather than being fully wired to backend endpoints. No standalone `package.json` is committed inside `frontend/`, so it must currently be run with an externally supplied React build setup.
 - The backend API is the source of truth for authentication, FAQ search, Q&A, users, and admin workflows.
 - The FAQ generation runner imports AI service functions through a local adapter. Path alignment may need adjustment depending on the execution location.
-- The vector store is in-memory; indexed FAQ vectors are loaded at application bootstrap and should be rehydrated after server restart.
+- The vector store is in-memory; indexed FAQ vectors are loaded at application bootstrap and should be rehydrated after server restart. This needs to be revisited for production-scale, multi-instance deployment.
 - Sensitive query handling is implemented both in the backend AI logic and the standalone Python classifier; the final production flow should keep one authoritative routing policy.
+- The 80% semantic similarity threshold requires empirical tuning — set too high, users cannot raise genuinely unanswered queries; set too low, duplicate queries flood the system.
+- Real-time embedding generation for autocomplete must feel instantaneous, which is why the embedding-cache service exists; further performance tuning may still be needed at scale.
+- Misclassifying a personal query as generic could expose sensitive information publicly, so high recall on the personal class is critical and should be monitored closely.
+- FAQ summarization quality depends on careful schema validation, deduplication, and tag normalization when compiling multiple community answers of varying quality into one entry.
+- The exact number of warnings before suspension, and whether enforcement of the tiered moderation policy is code-driven or manual, has not yet been finalized.
+- Multi-lingual support and the mentor-mentee system are planned but not yet implemented; both would add notable complexity (language detection, translation, cross-lingual embeddings for the former; scope and mechanics still undefined for the latter).
+- Real-time push notifications are not yet implemented; the My Queries dashboard currently relies on in-app notification records.
+- The points and ranking (leaderboard) system is implemented at the data layer but not yet fully reflected in the frontend.
+- In early deployment, the community board may see low activity (a cold-start problem), meaning queries could take longer to get answered before a critical mass of users is reached.
 
 ## License
 
